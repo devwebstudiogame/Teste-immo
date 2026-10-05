@@ -29,6 +29,11 @@ input[type=range]{padding:0}
 .ok{color:var(--green)}.ko{color:var(--red)}
 table{width:100%;border-collapse:collapse}td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
 tr.c{cursor:pointer}tr.c:hover{background:var(--paper)}
+#menu{position:fixed;inset:0;z-index:2000;background:var(--ink);display:grid;place-items:center;padding:16px;overflow:auto}
+#menu form{background:#fff;border-radius:8px;padding:22px 24px;width:min(440px,100%)}
+#menu h1{margin:0 0 4px;font-size:24px}
+#menu small{display:block;color:#55627a;margin-top:4px}
+#menu button{width:100%;margin-top:14px;padding:9px}
 #toast{position:fixed;left:14px;bottom:14px;max-width:340px;background:var(--ink);color:#fff;padding:9px 12px;border-radius:6px;opacity:0;transition:opacity .25s;pointer-events:none}
 #toast.on{opacity:1}
 @media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:42vh 1fr}aside{border-left:0}}
@@ -36,8 +41,8 @@ tr.c{cursor:pointer}tr.c:hover{background:var(--paper)}
 </style></head>
 <body>
 <header>
- <b>Empire Immo</b>
- <span id="hM"></span><span id="hC"></span><span id="hN"></span><span id="hT"></span>
+ <b id="ag">Empire Immo</b>
+ <span id="hM"></span><span id="hS"></span><span id="hC"></span><span id="hN"></span><span id="hT"></span>
  <button class="p" id="bN" onclick="next()">Mois suivant</button>
  <button id="bA" onclick="auto()">Auto ▶</button>
 </header>
@@ -48,11 +53,21 @@ tr.c{cursor:pointer}tr.c:hover{background:var(--paper)}
   <div id="panel" aria-live="polite"></div>
  </aside>
 </main>
+<div id="menu"><form onsubmit="go(event)">
+ <h1>Empire Immo</h1><p class="m">Fonde ton agence et bâtis l'empire le plus rentable de la ville.</p>
+ <label for="mv">Ville</label><input id="mv" list="vl" value="Lyon" required autocomplete="off"><datalist id="vl"></datalist>
+ <small>Grandes villes proposées ; toute autre ville est cherchée sur OpenStreetMap.</small>
+ <label for="ma">Nom de l'agence</label><input id="ma" required maxlength="40" placeholder="Ex. Sorel Patrimoine">
+ <label for="ms">Type de société</label><select id="ms"><option>SCI — petit bureau, 3 biens max</option><option disabled>SARL — 8 biens (à débloquer en jeu)</option><option disabled>SAS — illimité (à débloquer en jeu)</option></select>
+ <p id="me" class="ko" role="alert"></p>
+ <button class="p">Commencer la partie</button></form></div>
 <div id="toast" role="status"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 // ---------- Config ----------
-const CITY={nom:'Lyon',c:[45.764,4.8357]}; // change la ville ici
+let CITY={nom:'Lyon',c:[45.764,4.8357]};
+const PRESETS={lyon:[45.764,4.8357],paris:[48.8566,2.3522],marseille:[43.2965,5.3698],toulouse:[43.6047,1.4442],bordeaux:[44.8378,-0.5792],nantes:[47.2184,-1.5536],lille:[50.6292,3.0573],strasbourg:[48.5734,7.7521],nice:[43.7102,7.262],rennes:[48.1173,-1.6778],montpellier:[43.6108,3.8767],grenoble:[45.1885,5.7245],dijon:[47.322,5.0415],tours:[47.3941,0.6848],orleans:[47.9029,1.9093],bourges:[47.0844,2.3964]};
+const SOC=[{n:'SCI',d:'petit bureau',max:3,seuil:0},{n:'SARL',d:'agence familiale',max:8,seuil:150000},{n:'SAS',d:'groupe immobilier',max:99,seuil:400000}];
 const FIN=120, SALAIRE=2000, VIE=1300;
 const TYPES=[['Studio',18,30,12],['T2',35,50,10],['T3',55,75,9],['Maison',80,130,8],['Local commercial',40,120,9.5]];
 const NOMS=['Camille B.','Yanis K.','Sophie L.','Hugo M.','Léa R.','Karim D.','Nora P.','Tom V.','Julie S.'];
@@ -60,7 +75,7 @@ const PROF={Fiable:{pi:.01,mult:1},Moyen:{pi:.04,mult:1.05},Risqué:{pi:.1,mult:
 const RC=['#b5651d','#6a4c93','#1d7874'];
 const rnd=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rnd(a,b+1)),pick=a=>a[ri(0,a.length-1)];
 const f=n=>Math.round(n).toLocaleString('fr-FR')+' €';
-const S={mois:1,cash:50000,taux:3.8,props:[],sel:null,tab:'d',tm:null,log:[],
+const S={agence:'',soc:0,mois:1,cash:50000,taux:3.8,props:[],sel:null,tab:'d',tm:null,log:[],
  riv:['Marc Delorme','Agence Sorel','Inès Garnier'].map((n,i)=>({nom:n,col:RC[i],cash:50000,debt:0}))};
 let uid=0,mk={},tt;
 // ---------- Modèle ----------
@@ -82,7 +97,7 @@ function newProp(){
 function tenant(){const k=pick(Object.keys(PROF));return{nom:pick(NOMS),prof:k,pi:PROF[k].pi,mult:PROF[k].mult}}
 // ---------- Carte ----------
 const map=L.map('map').setView(CITY.c,12);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
 function col(p){return p.owner==='m'?'#7c8696':p.owner==='me'?'#1a7f4b':S.riv[p.owner].col}
 function paint(p){
  if(!mk[p.id]){mk[p.id]=L.circleMarker([p.lat,p.lng],{radius:8}).addTo(map).on('click',()=>sel(p.id))}
@@ -96,6 +111,7 @@ function head(){
  hM.innerHTML=`Mois ${S.mois}/${FIN}<small>${CITY.nom}</small>`;
  hC.innerHTML=`${f(S.cash)}<small>Trésorerie</small>`;
  hN.innerHTML=`${f(net())}<small>Patrimoine net</small>`;
+ hS.innerHTML=`${SOC[S.soc].n} ${mine().length}/${SOC[S.soc].max}<small>Biens</small>`;
  hT.innerHTML=`${S.taux.toFixed(2)} %<small>Taux crédit 20 ans</small>`}
 function render(){
  head();
@@ -121,6 +137,7 @@ function calc(){
  const o=+document.getElementById('o').value,price=p.ask*o/100,frais=price*.08,ap=+document.getElementById('a').value||0,n=+document.getElementById('d').value;
  const t=S.taux+(n-20)*.03,loan=Math.max(0,price-ap),m=loan?mens(loan,t,n*12):0;
  const cap=.35*(SALAIRE+.7*loyers()),errs=[];
+ if(mine().length>=SOC[S.soc].max)errs.push(`Ta ${SOC[S.soc].n} est limitée à ${SOC[S.soc].max} biens. Vends un bien ou change de société (onglet Patrimoine).`);
  if(ap<price*.1)errs.push('Apport minimum : 10 % du prix.');
  if(ap+frais>S.cash)errs.push('Trésorerie insuffisante (apport + 8 % de frais de notaire).');
  if(mensTot()+m>cap)errs.push(`Refus de la banque : endettement max ${f(cap)}/mois.`);
@@ -162,9 +179,13 @@ function sell(){
  const p=get(S.sel);S.cash+=value(p)*.97-(p.loan?p.loan.rest:0);
  p.owner='m';p.loan=null;p.bail=null;p.ask=value(p)*1.05;paint(p);toast(`Bien vendu ${f(value(p)*.97)}.`);render()}
 function patrimoine(){
- const l=mine();if(!l.length)return '<p>Aucun bien pour l\'instant. Choisis une annonce sur la carte.</p>';
- return `<table><tr><th>Bien</th><th>Loué</th><th>Loyer</th><th>Bail</th><th>État</th></tr>`+l.map(p=>`<tr class="c" onclick="fly(${p.id})"><td>${p.type} ${p.surf} m²</td><td>${p.bail?p.bail.surfL+' m²':'—'}</td><td>${p.bail?(p.bail.impaye?'<span class=ko>impayé</span>':f(p.bail.loyer)):'vacant'}</td><td>${p.bail?p.bail.reste+' m.':'—'}</td><td>${Math.round(p.etat)}</td></tr>`).join('')+`</table>
+ const l=mine();if(!l.length)return socBox()+'<p>Aucun bien pour l\'instant. Choisis une annonce sur la carte.</p>';
+ return socBox()+`<table><tr><th>Bien</th><th>Loué</th><th>Loyer</th><th>Bail</th><th>État</th></tr>`+l.map(p=>`<tr class="c" onclick="fly(${p.id})"><td>${p.type} ${p.surf} m²</td><td>${p.bail?p.bail.surfL+' m²':'—'}</td><td>${p.bail?(p.bail.impaye?'<span class=ko>impayé</span>':f(p.bail.loyer)):'vacant'}</td><td>${p.bail?p.bail.reste+' m.':'—'}</td><td>${Math.round(p.etat)}</td></tr>`).join('')+`</table>
  <div class="box">Loyers : ${f(loyers())}/mois · Mensualités : ${f(mensTot())}/mois</div>`}
+function socBox(){
+ const s=SOC[S.soc],n=SOC[S.soc+1];
+ return `<div class="box"><b>${S.agence}</b> — ${s.n} (${s.d})<br>Biens : ${mine().length}/${s.max}`+(n?`<br>Prochaine étape : ${n.n}, ${n.max} biens max, dès ${f(n.seuil)} de patrimoine net (frais 1 500 €).<br><button onclick="upgrade()" ${net()>=n.seuil&&S.cash>=1500?'':'disabled'}>Passer en ${n.n}</button>`:'')+`</div>`}
+function upgrade(){const n=SOC[S.soc+1];S.cash-=1500;S.soc++;toast(`${S.agence} devient une ${n.n} : ${n.max} biens max.`);render()}
 function fly(id){const p=get(id);map.flyTo([p.lat,p.lng],15);sel(id)}
 function classement(){
  const r=[{n:'Toi',v:net(),me:1},...S.riv.map((x,i)=>({n:x.nom,v:rivNet(x,i)}))].sort((a,b)=>b.v-a.v);
@@ -202,7 +223,18 @@ function end(){
  const r=[{n:'Toi',v:net()},...S.riv.map((x,i)=>({n:x.nom,v:rivNet(x,i)}))].sort((a,b)=>b.v-a.v);
  toast(`Fin de partie ! Vainqueur : ${r[0].n} (${f(r[0].v)}).`)}
 // ---------- Démarrage ----------
-for(let i=0;i<30;i++){const p=newProp();S.props.push(p);paint(p)}
-render();
+vl.innerHTML=Object.keys(PRESETS).map(k=>`<option value="${k[0].toUpperCase()+k.slice(1)}">`).join('');
+const norm=t=>t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+async function go(e){
+ e.preventDefault();const v=mv.value.trim(),btn=e.target.querySelector('button');
+ btn.disabled=true;me.textContent='Recherche de la ville…';
+ let c=PRESETS[norm(v)];
+ if(!c){try{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(v));const j=await r.json();if(j[0])c=[+j[0].lat,+j[0].lon]}catch(x){}}
+ if(!c){me.textContent='Ville introuvable. Vérifie l\'orthographe ou choisis une ville de la liste.';btn.disabled=false;return}
+ CITY={nom:v[0].toUpperCase()+v.slice(1),c};S.agence=ma.value.trim();
+ ag.textContent=S.agence;document.title=S.agence+' — Empire Immo';
+ menu.remove();map.setView(c,12);
+ for(let i=0;i<30;i++){const p=newProp();S.props.push(p);paint(p)}
+ render()}
 </script>
 </body></html>
