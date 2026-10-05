@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Empire Immo — jeu d'investisseur</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14213d;--paper:#f2f4f7;--line:#cfd6e0;--blue:#1f4e79;--green:#1a7f4b;--red:#b3392b}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:14px/1.45 'IBM Plex Sans',system-ui,sans-serif;color:var(--ink);background:var(--paper);display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:6px 20px;align-items:center;padding:8px 14px;background:var(--ink);color:#fff}
+header b{font-size:17px;margin-right:auto}
+header span{font-weight:600}header small{display:block;opacity:.65;font-size:11px;font-weight:400}
+button{font:inherit;border:1px solid var(--ink);background:#fff;color:var(--ink);padding:5px 10px;border-radius:4px;cursor:pointer}
+button.p{background:var(--blue);color:#fff;border-color:var(--blue)}button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid #e8a317;outline-offset:2px}
+main{flex:1;display:grid;grid-template-columns:1fr 410px;min-height:0}
+#map{min-height:280px}
+aside{display:flex;flex-direction:column;border-left:1px solid var(--line);background:#fff;min-height:0}
+nav{display:flex;border-bottom:1px solid var(--line)}
+nav button{flex:1;border:0;border-radius:0;background:none;padding:9px 4px}
+nav button.on{box-shadow:inset 0 -3px var(--blue);font-weight:600}
+#panel{padding:12px 14px;overflow:auto;flex:1}
+h3{margin:0 0 4px;font-size:17px}.m{color:#55627a;margin:0 0 10px}
+label{display:block;margin:8px 0 2px;font-weight:600}
+input,select{font:inherit;width:100%;padding:5px;border:1px solid var(--line);border-radius:4px}
+input[type=range]{padding:0}
+.box{border:1px solid var(--line);border-radius:6px;padding:9px 11px;margin:10px 0;background:var(--paper)}
+.ok{color:var(--green)}.ko{color:var(--red)}
+table{width:100%;border-collapse:collapse}td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+tr.c{cursor:pointer}tr.c:hover{background:var(--paper)}
+#menu{position:fixed;inset:0;z-index:2000;background:var(--ink);display:grid;place-items:center;padding:16px;overflow:auto}
+#menu form{background:#fff;border-radius:8px;padding:22px 24px;width:min(440px,100%)}
+#menu h1{margin:0 0 4px;font-size:24px}
+#menu small{display:block;color:#55627a;margin-top:4px}
+#menu button{width:100%;margin-top:14px;padding:9px}
+#toast{position:fixed;left:14px;bottom:14px;max-width:340px;background:var(--ink);color:#fff;padding:9px 12px;border-radius:6px;opacity:0;transition:opacity .25s;pointer-events:none}
+#toast.on{opacity:1}
+@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:42vh 1fr}aside{border-left:0}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head>
+<body>
+<header>
+ <b id="ag">Empire Immo</b>
+ <span id="hM"></span><span id="hS"></span><span id="hC"></span><span id="hN"></span><span id="hT"></span>
+ <button class="p" id="bN" onclick="next()">Mois suivant</button>
+ <button id="bA" onclick="auto()">Auto ▶</button>
+</header>
+<main>
+ <div id="map" aria-label="Carte OpenStreetMap des biens"></div>
+ <aside>
+  <nav id="nav"></nav>
+  <div id="panel" aria-live="polite"></div>
+ </aside>
+</main>
+<div id="menu"><form onsubmit="go(event)">
+ <h1>Empire Immo</h1><p class="m">Fonde ton agence et bâtis l'empire le plus rentable de la ville.</p>
+ <label for="mv">Ville</label><input id="mv" list="vl" value="Lyon" required autocomplete="off"><datalist id="vl"></datalist>
+ <small>Grandes villes proposées ; toute autre ville est cherchée sur OpenStreetMap.</small>
+ <label for="ma">Nom de l'agence</label><input id="ma" required maxlength="40" placeholder="Ex. Sorel Patrimoine">
+ <label for="ms">Type de société</label><select id="ms"><option>SCI — petit bureau, 3 biens max</option><option disabled>SARL — 8 biens (à débloquer en jeu)</option><option disabled>SAS — illimité (à débloquer en jeu)</option></select>
+ <p id="me" class="ko" role="alert"></p>
+ <button class="p">Commencer la partie</button></form></div>
+<div id="toast" role="status"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ---------- Config ----------
+let CITY={nom:'Lyon',c:[45.764,4.8357]};
+const PRESETS={lyon:[45.764,4.8357],paris:[48.8566,2.3522],marseille:[43.2965,5.3698],toulouse:[43.6047,1.4442],bordeaux:[44.8378,-0.5792],nantes:[47.2184,-1.5536],lille:[50.6292,3.0573],strasbourg:[48.5734,7.7521],nice:[43.7102,7.262],rennes:[48.1173,-1.6778],montpellier:[43.6108,3.8767],grenoble:[45.1885,5.7245],dijon:[47.322,5.0415],tours:[47.3941,0.6848],orleans:[47.9029,1.9093],bourges:[47.0844,2.3964]};
+const SOC=[{n:'SCI',d:'petit bureau',max:3,seuil:0},{n:'SARL',d:'agence familiale',max:8,seuil:150000},{n:'SAS',d:'groupe immobilier',max:99,seuil:400000}];
+const FIN=120, SALAIRE=2000, VIE=1300;
+const TYPES=[['Studio',18,30,12],['T2',35,50,10],['T3',55,75,9],['Maison',80,130,8],['Local commercial',40,120,9.5]];
+const NOMS=['Camille B.','Yanis K.','Sophie L.','Hugo M.','Léa R.','Karim D.','Nora P.','Tom V.','Julie S.'];
+const PROF={Fiable:{pi:.01,mult:1},Moyen:{pi:.04,mult:1.05},Risqué:{pi:.1,mult:1.12}};
+const RC=['#b5651d','#6a4c93','#1d7874'];
+const rnd=(a,b)=>a+Math.random()*(b-a),ri=(a,b)=>Math.floor(rnd(a,b+1)),pick=a=>a[ri(0,a.length-1)];
+const f=n=>Math.round(n).toLocaleString('fr-FR')+' €';
+const S={agence:'',soc:0,mois:1,cash:50000,taux:3.8,props:[],sel:null,tab:'d',tm:null,log:[],
+ riv:['Marc Delorme','Agence Sorel','Inès Garnier'].map((n,i)=>({nom:n,col:RC[i],cash:50000,debt:0}))};
+let uid=0,mk={},tt;
+// ---------- Modèle ----------
+const get=id=>S.props.find(p=>p.id===id);
+const mine=()=>S.props.filter(p=>p.owner==='me');
+const value=p=>p.surf*p.ppm2*(.85+p.etat*.002);
+const rentM2=p=>p.base*p.zone*(.7+p.etat*.006);
+const mens=(c,t,n)=>{const r=t/1200;return c*r/(1-Math.pow(1+r,-n))};
+const loyers=()=>mine().reduce((s,p)=>s+(p.bail&&!p.bail.impaye?p.bail.loyer:0),0);
+const mensTot=()=>mine().reduce((s,p)=>s+(p.loan?p.loan.mens:0),0);
+const net=()=>S.cash+mine().reduce((s,p)=>s+value(p)-(p.loan?p.loan.rest:0),0);
+const rivNet=(r,i)=>r.cash-r.debt+S.props.filter(p=>p.owner===i).reduce((s,p)=>s+value(p),0);
+function newProp(){
+ const t=pick(TYPES),a=rnd(0,.07),b=rnd(0,6.283);
+ const lat=CITY.c[0]+Math.cos(b)*a*.7,lng=CITY.c[1]+Math.sin(b)*a;
+ const km=Math.hypot((lng-CITY.c[1])*78,(lat-CITY.c[0])*111);
+ const p={id:++uid,lat,lng,type:t[0],surf:ri(t[1],t[2]),etat:ri(25,90),base:t[3],zone:Math.max(.55,1.15-km*.045),ppm2:2200*rnd(.85,1.15),owner:'m',bail:null,loan:null};
+ p.ask=value(p)*rnd(1,1.12);return p}
+function tenant(){const k=pick(Object.keys(PROF));return{nom:pick(NOMS),prof:k,pi:PROF[k].pi,mult:PROF[k].mult}}
+// ---------- Carte ----------
+const map=L.map('map').setView(CITY.c,12);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+function col(p){return p.owner==='m'?'#7c8696':p.owner==='me'?'#1a7f4b':S.riv[p.owner].col}
+function paint(p){
+ if(!mk[p.id]){mk[p.id]=L.circleMarker([p.lat,p.lng],{radius:8}).addTo(map).on('click',()=>sel(p.id))}
+ mk[p.id].setStyle({color:S.sel===p.id?'#14213d':'#fff',weight:S.sel===p.id?3:1.5,fillColor:col(p),fillOpacity:.95,radius:5+p.surf/20})}
+function unpaint(p){if(mk[p.id]){map.removeLayer(mk[p.id]);delete mk[p.id]}}
+// ---------- UI ----------
+function toast(m){S.log.unshift(`Mois ${S.mois} — ${m}`);const t=document.getElementById('toast');t.textContent=m;t.className='on';clearTimeout(tt);tt=setTimeout(()=>t.className='',3200)}
+function sel(id){const o=S.sel;S.sel=id;S.tab='d';if(o&&get(o))paint(get(o));paint(get(id));render()}
+function tab(t){S.tab=t;render()}
+function head(){
+ hM.innerHTML=`Mois ${S.mois}/${FIN}<small>${CITY.nom}</small>`;
+ hC.innerHTML=`${f(S.cash)}<small>Trésorerie</small>`;
+ hN.innerHTML=`${f(net())}<small>Patrimoine net</small>`;
+ hS.innerHTML=`${SOC[S.soc].n} ${mine().length}/${SOC[S.soc].max}<small>Biens</small>`;
+ hT.innerHTML=`${S.taux.toFixed(2)} %<small>Taux crédit 20 ans</small>`}
+function render(){
+ head();
+ nav.innerHTML=[['d','Détail'],['p','Patrimoine'],['c','Classement'],['j','Journal']].map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="tab('${k}')">${l}</button>`).join('');
+ panel.innerHTML={d:detail,p:patrimoine,c:classement,j:journal}[S.tab]();
+ if(S.tab==='d'&&get(S.sel)){const p=get(S.sel);if(p.owner==='m')calc();if(p.owner==='me'&&!p.bail)calcBail()}}
+function detail(){
+ const p=get(S.sel);
+ if(!p)return `<p>Clique sur un point de la carte.</p><p class="m">Gris : à vendre · Vert : à toi · Couleurs : concurrents. Achète avec un crédit, loue, rénove, et dépasse les 3 investisseurs IA en ${FIN} mois.</p>`;
+ let h=`<h3>${p.type} · ${p.surf} m²</h3><p class="m">État ${Math.round(p.etat)}/100 · valeur estimée ${f(value(p))} · loyer de marché ${rentM2(p).toFixed(1)} €/m²</p>`;
+ if(p.owner==='m')return h+buyForm(p);
+ if(p.owner==='me')return h+mineForm(p);
+ return h+`<p>Propriété de <b>${S.riv[p.owner].nom}</b>.</p>`}
+function buyForm(p){
+ return `<div class="box">Prix demandé : <b>${f(p.ask)}</b> (${f(p.ask/p.surf)}/m²)</div>
+ <label>Offre : <span id="oV"></span> du prix demandé</label><input type="range" id="o" min="80" max="100" value="95" oninput="calc()">
+ <label>Apport (€)</label><input type="number" id="a" min="0" step="500" value="${Math.round(p.ask*.95*.2/500)*500}" oninput="calc()">
+ <label>Durée du crédit</label><select id="d" onchange="calc()"><option value="15">15 ans</option><option value="20" selected>20 ans</option><option value="25">25 ans</option></select>
+ <div class="box" id="res"></div>
+ <button class="p" id="buy" onclick="buy()">Faire l'offre</button>`}
+function calc(){
+ const p=get(S.sel);if(!p||p.owner!=='m'||!document.getElementById('o'))return;
+ const o=+document.getElementById('o').value,price=p.ask*o/100,frais=price*.08,ap=+document.getElementById('a').value||0,n=+document.getElementById('d').value;
+ const t=S.taux+(n-20)*.03,loan=Math.max(0,price-ap),m=loan?mens(loan,t,n*12):0;
+ const cap=.35*(SALAIRE+.7*loyers()),errs=[];
+ if(mine().length>=SOC[S.soc].max)errs.push(`Ta ${SOC[S.soc].n} est limitée à ${SOC[S.soc].max} biens. Vends un bien ou change de société (onglet Patrimoine).`);
+ if(ap<price*.1)errs.push('Apport minimum : 10 % du prix.');
+ if(ap+frais>S.cash)errs.push('Trésorerie insuffisante (apport + 8 % de frais de notaire).');
+ if(mensTot()+m>cap)errs.push(`Refus de la banque : endettement max ${f(cap)}/mois.`);
+ if(p.refus===S.mois)errs.push('Le vendeur a refusé ce mois-ci.');
+ const gain=p.surf*rentM2(p);
+ oV.textContent=o+' %';
+ res.innerHTML=`Prix : <b>${f(price)}</b> + notaire ${f(frais)}<br>Crédit : <b>${f(loan)}</b> à ${t.toFixed(2)} % → <b>${f(m)}/mois</b><br>Loyer potentiel : ~${f(gain)}/mois<br>`+(errs.length?errs.map(e=>`<span class="ko">${e}</span>`).join('<br>'):'<span class="ok">Financement accepté.</span>');
+ buy.disabled=errs.length>0}
+function buy(){
+ const p=get(S.sel),o=+document.getElementById('o').value,price=p.ask*o/100,ap=+a.value,n=+d.value;
+ if(Math.random()>(o>=98?1:Math.pow((o-80)/18,1.5))){p.refus=S.mois;toast('Le vendeur refuse ton offre. Réessaie le mois prochain.');render();return}
+ const t=S.taux+(n-20)*.03,loan=price-ap;
+ S.cash-=ap+price*.08;p.owner='me';p.etat=p.etat;
+ p.loan=loan>0?{rest:loan,t,mens:mens(loan,t,n*12),left:n*12}:null;
+ paint(p);toast(`Achat : ${p.type} ${p.surf} m² pour ${f(price)}.`);render()}
+function mineForm(p){
+ let h='';
+ if(p.loan)h+=`<div class="box">Crédit : reste ${f(p.loan.rest)} · ${f(p.loan.mens)}/mois à ${p.loan.t.toFixed(2)} % · ${Math.ceil(p.loan.left/12)} an(s)</div>`;
+ if(p.bail){const b=p.bail;
+  h+=`<div class="box"><b>Bail en cours</b><br>Locataire : ${b.t.nom} (${b.t.prof})<br>Surface louée : ${b.surfL} m² sur ${p.surf} m²<br>Loyer : <b>${f(b.loyer)}/mois</b> (${(b.loyer/b.surfL).toFixed(1)} €/m²)<br>Durée : ${b.duree} mois · reste ${b.reste} mois`+(b.impaye?`<br><span class="ko">Impayé : ${f(b.arrears)} dus</span>`:'')+`</div>`}
+ else{p.cands=p.cands||[tenant(),tenant(),tenant()];
+  h+=`<div class="box"><b>Bien vacant — choisis un locataire</b>
+  <label>Candidat</label><select id="ct" onchange="calcBail()">${p.cands.map((c,i)=>`<option value="${i}">${c.nom} — dossier ${c.prof}</option>`).join('')}</select>
+  <label>Surface louée : <span id="sV"></span> m²</label><input type="range" id="sl" min="${Math.ceil(p.surf*.3)}" max="${p.surf}" value="${p.surf}" oninput="calcBail()">
+  <label>Durée du bail</label><select id="du" onchange="calcBail()"><option value="12">12 mois</option><option value="24">24 mois</option><option value="36">36 mois</option></select>
+  <p id="lr"></p><button class="p" onclick="lease()">Signer le bail</button></div>`}
+ h+=`<div class="box"><b>Travaux</b><br><button onclick="reno(150,12)" ${S.cash<150*p.surf?'disabled':''}>Rafraîchir ${f(150*p.surf)} (+12)</button> <button onclick="reno(420,35)" ${S.cash<420*p.surf?'disabled':''}>Rénovation lourde ${f(420*p.surf)} (+35)</button></div>`;
+ return h+`<button onclick="sell()">Vendre pour ${f(value(p)*.97)} (net ${f(value(p)*.97-(p.loan?p.loan.rest:0))})</button>`}
+function calcBail(){
+ const p=get(S.sel);if(!p||!document.getElementById('ct'))return;
+ const c=p.cands[+ct.value],s=+sl.value,loyer=s*rentM2(p)*c.mult;
+ sV.textContent=s;lr.innerHTML=`Loyer : <b>${f(loyer)}/mois</b> (${(rentM2(p)*c.mult).toFixed(1)} €/m²) · risque d'impayé ${Math.round(c.pi*100)} %/mois`}
+function lease(){
+ const p=get(S.sel),c=p.cands[+ct.value],s=+sl.value,dur=+du.value;
+ p.bail={t:c,surfL:s,loyer:s*rentM2(p)*c.mult,duree:dur,reste:dur,impaye:false,arrears:0};p.cands=null;
+ toast(`Bail signé avec ${c.nom} : ${f(p.bail.loyer)}/mois.`);render()}
+function reno(c,g){const p=get(S.sel),cost=c*p.surf;S.cash-=cost;p.etat=Math.min(100,p.etat+g);toast(`Travaux terminés (${f(cost)}). État : ${Math.round(p.etat)}/100.`);render()}
+function sell(){
+ const p=get(S.sel);S.cash+=value(p)*.97-(p.loan?p.loan.rest:0);
+ p.owner='m';p.loan=null;p.bail=null;p.ask=value(p)*1.05;paint(p);toast(`Bien vendu ${f(value(p)*.97)}.`);render()}
+function patrimoine(){
+ const l=mine();if(!l.length)return socBox()+'<p>Aucun bien pour l\'instant. Choisis une annonce sur la carte.</p>';
+ return socBox()+`<table><tr><th>Bien</th><th>Loué</th><th>Loyer</th><th>Bail</th><th>État</th></tr>`+l.map(p=>`<tr class="c" onclick="fly(${p.id})"><td>${p.type} ${p.surf} m²</td><td>${p.bail?p.bail.surfL+' m²':'—'}</td><td>${p.bail?(p.bail.impaye?'<span class=ko>impayé</span>':f(p.bail.loyer)):'vacant'}</td><td>${p.bail?p.bail.reste+' m.':'—'}</td><td>${Math.round(p.etat)}</td></tr>`).join('')+`</table>
+ <div class="box">Loyers : ${f(loyers())}/mois · Mensualités : ${f(mensTot())}/mois</div>`}
+function socBox(){
+ const s=SOC[S.soc],n=SOC[S.soc+1];
+ return `<div class="box"><b>${S.agence}</b> — ${s.n} (${s.d})<br>Biens : ${mine().length}/${s.max}`+(n?`<br>Prochaine étape : ${n.n}, ${n.max} biens max, dès ${f(n.seuil)} de patrimoine net (frais 1 500 €).<br><button onclick="upgrade()" ${net()>=n.seuil&&S.cash>=1500?'':'disabled'}>Passer en ${n.n}</button>`:'')+`</div>`}
+function upgrade(){const n=SOC[S.soc+1];S.cash-=1500;S.soc++;toast(`${S.agence} devient une ${n.n} : ${n.max} biens max.`);render()}
+function fly(id){const p=get(id);map.flyTo([p.lat,p.lng],15);sel(id)}
+function classement(){
+ const r=[{n:'Toi',v:net(),me:1},...S.riv.map((x,i)=>({n:x.nom,v:rivNet(x,i)}))].sort((a,b)=>b.v-a.v);
+ return `<table>`+r.map((x,i)=>`<tr><td>${i+1}</td><td>${x.me?'<b>Toi</b>':x.n}</td><td>${f(x.v)}</td></tr>`).join('')+`</table><p class="m">Patrimoine net = trésorerie + valeur des biens − dettes. Fin de partie au mois ${FIN}.</p>`}
+function journal(){return S.log.length?'<p>'+S.log.slice(0,40).join('</p><p>')+'</p>':'<p>Rien pour l\'instant.</p>'}
+// ---------- Tour de jeu ----------
+function next(){
+ if(S.mois>=FIN)return end();
+ S.mois++;S.taux=Math.min(7,Math.max(1.5,S.taux+rnd(-.2,.2)));S.cash+=SALAIRE-VIE;
+ mine().forEach(p=>{
+  if(p.loan){const i=p.loan.rest*p.loan.t/1200;S.cash-=p.loan.mens;p.loan.rest=Math.max(0,p.loan.rest-(p.loan.mens-i));if(--p.loan.left<=0)p.loan=null}
+  S.cash-=value(p)*.0007;p.etat=Math.max(5,p.etat-.25);
+  const b=p.bail;
+  if(b){
+   if(b.impaye){b.arrears+=b.loyer;
+    if(Math.random()<.4){S.cash+=b.arrears;toast(`${b.t.nom} régularise ${f(b.arrears)}.`);b.impaye=false;b.arrears=0}
+    else if(b.arrears>=b.loyer*4){toast(`${b.t.nom} quitte le logement, impayés perdus.`);p.bail=null;return}}
+   else{S.cash+=b.loyer;if(Math.random()<b.t.pi){b.impaye=true;b.arrears=0;toast(`Impayé de ${b.t.nom} sur ton ${p.type}.`)}}
+   if(p.bail&&--b.reste<=0){toast(`Bail terminé : ${p.type} ${p.surf} m² vacant.`);p.bail=null}}
+  if(Math.random()<.04){const c=ri(300,1500);S.cash-=c;p.etat=Math.max(5,p.etat-3);toast(`Fuite d'eau (${p.type}) : ${f(c)} de réparation.`)}
+ });
+ S.riv.forEach((r,i)=>{
+  const own=S.props.filter(p=>p.owner===i);
+  r.cash+=SALAIRE-VIE+own.reduce((s,p)=>s+p.surf*rentM2(p)*.85,0)-r.debt*.0058;r.debt*=.9975;
+  if(Math.random()<.4){const o=S.props.filter(p=>p.owner==='m'&&r.cash>p.ask*.18).sort((a,b)=>a.ask/value(a)-b.ask/value(b))[0];
+   if(o){r.cash-=o.ask*.18;r.debt+=o.ask*.9;o.owner=i;paint(o);if(o.id===S.sel)render();toast(`${r.nom} a acheté un ${o.type} de ${o.surf} m².`)}}});
+ S.props.filter(p=>p.owner==='m'&&Math.random()<.08).forEach(p=>{unpaint(p);S.props.splice(S.props.indexOf(p),1);if(S.sel===p.id)S.sel=null});
+ for(let k=ri(1,3);k--;){if(S.props.filter(p=>p.owner==='m').length<45){const p=newProp();S.props.push(p);paint(p)}}
+ render();if(S.mois>=FIN)end()}
+function auto(){
+ if(S.tm){clearInterval(S.tm);S.tm=null;bA.textContent='Auto ▶'}
+ else{S.tm=setInterval(next,1500);bA.textContent='Pause ⏸'}}
+function end(){
+ clearInterval(S.tm);S.tm=null;bN.disabled=bA.disabled=true;S.tab='c';render();
+ const r=[{n:'Toi',v:net()},...S.riv.map((x,i)=>({n:x.nom,v:rivNet(x,i)}))].sort((a,b)=>b.v-a.v);
+ toast(`Fin de partie ! Vainqueur : ${r[0].n} (${f(r[0].v)}).`)}
+// ---------- Démarrage ----------
+vl.innerHTML=Object.keys(PRESETS).map(k=>`<option value="${k[0].toUpperCase()+k.slice(1)}">`).join('');
+const norm=t=>t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+async function go(e){
+ e.preventDefault();const v=mv.value.trim(),btn=e.target.querySelector('button');
+ btn.disabled=true;me.textContent='Recherche de la ville…';
+ let c=PRESETS[norm(v)];
+ if(!c){try{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(v));const j=await r.json();if(j[0])c=[+j[0].lat,+j[0].lon]}catch(x){}}
+ if(!c){me.textContent='Ville introuvable. Vérifie l\'orthographe ou choisis une ville de la liste.';btn.disabled=false;return}
+ CITY={nom:v[0].toUpperCase()+v.slice(1),c};S.agence=ma.value.trim();
+ ag.textContent=S.agence;document.title=S.agence+' — Empire Immo';
+ menu.remove();map.setView(c,12);
+ for(let i=0;i<30;i++){const p=newProp();S.props.push(p);paint(p)}
+ render()}
+</script>
+</body></html>
