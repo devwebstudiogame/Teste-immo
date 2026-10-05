@@ -99,7 +99,10 @@ function tenant(){const k=pick(Object.keys(PROF));return{nom:pick(NOMS),prof:k,p
 
 // ---------- Carte ----------
 const map=L.map('map').setView(CITY.c,12);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
 
 function col(p){return p.owner==='m'?'#7c8696':p.owner==='me'?'#1a7f4b':S.riv[p.owner].col}
 function paint(p){
